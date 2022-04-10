@@ -6,6 +6,11 @@
 #include "vector.h"
 #include <math.h>
 
+/**
+ * @brief camera class
+ * @author LiuZhixing, liuzhixing@zju.edu.cn
+ * 
+ */
 class Camera {
 public:
 	Camera() {}

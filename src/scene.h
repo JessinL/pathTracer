@@ -232,7 +232,7 @@ public:
 
 	/**
 	 * @brief tell if a ray intersects with an object made up by triangle meshes
-	 * @note 1.if not only one intersection point, get the nearest point to the rayStartingPoint; 2.could be accelerated by octree data structure
+	 * @note 1.if not only one intersection point, get the nearest point to the rayStartingPoint; 2.could be accelerated by k-d tree data structure
 	 * 
 	 * @param rayDirection 
 	 * @param rayStartingPoint rayDirection and rayStartingPoint represent a ray
@@ -270,7 +270,7 @@ public:
 	 * @param rayStartingPoint
 	 * @param wor
 	 * @param wog
-	 * @param wob
+	 * @param wob wor, wog and wob are shading result
 	 */
 	void shade(
 		const Vector& p, const int& triangleId, 
@@ -303,7 +303,15 @@ public:
 	*/
 	void getPIntersectionTriangles(
 		const Vector& rayDirection, const Vector& rayStartingPoint,
-		std::vector<int>& trianglesId
+		std::vector< std::vector<int> >& trianglesId
+	);
+
+	void calDirRadiance(
+		const Vector& p, const Vector& pNormal, const int& pMaterial,
+		const Vector& lightCenter, const Vector& lightNormal,
+		const Vector& ray,
+		const double& lightr, const double& lightg, const double& lightb, const double& lightarea,
+		double* r, double* g, double* b
 	);
 
 protected:
@@ -383,7 +391,7 @@ void Scene::MonteCarloPathTracer() {
 		double lineStart = clock();
 		for (int jj = 0; jj < camera.width; jj++) {
 			// sample times
-			int sampleTimes = 1;
+			int sampleTimes = 10;
 
 			Vector pixel = screenCenter - (double)(ii - camera.height / 2) * up - (double)(jj - camera.width / 2)*side;
 
@@ -417,10 +425,6 @@ void Scene::MonteCarloPathTracer() {
 				// 2. shading the intersection point
 				else {
 					double thiswor = 0, thiswog = 0, thiswob = 0;
-#ifdef DEBUG_LZX
-					if (time == 0)
-						facetId = triangleId;
-#endif
 
 					shade(p, triangleId, rayDirection, camera.eye, &thiswor, &thiswog, &thiswob);
 					wor += thiswor;
@@ -430,9 +434,9 @@ void Scene::MonteCarloPathTracer() {
 			}
 
 			// get the average color of all the samples
-			wor /= sampleTimes;
-			wog /= sampleTimes;
-			wob /= sampleTimes;
+			wor /= (double)sampleTimes;
+			wog /= (double)sampleTimes;
+			wob /= (double)sampleTimes;
 
 			if (wor > 1.0)
 				wor = 1.0;
@@ -465,31 +469,39 @@ void Scene::rayObjectIntersecionDetective(
 	// a pair < affine coordinate, triangleId > to represent a intersection point
 	std::set< std::pair<double, int> > intersectionPoints;
 
-	std::vector<int> pIntersectionTriangles;
+	std::vector< std::vector<int> > pIntersectionTriangles;
 	getPIntersectionTriangles(rayDirection, rayStartingPoint, pIntersectionTriangles);
 
-	for (int ii = 0; ii < object.shapes[0].mesh.num_face_vertices.size(); ii++) {
-		int& triangleId = ii;
+	for (int ii = 0; ii < pIntersectionTriangles.size(); ii++) {
+		int intersectionFlag = 0;
+		for(int jj = 0; jj < pIntersectionTriangles[ii].size(); jj++){
+			int& triangleId = pIntersectionTriangles[ii][jj];
 
-		int index0 = object.shapes[0].mesh.indices[3 * triangleId].vertex_index;
-		int index1 = object.shapes[0].mesh.indices[3 * triangleId + 1].vertex_index;
-		int index2 = object.shapes[0].mesh.indices[3 * triangleId + 2].vertex_index;
-		Vector point0(object.attrib.vertices[3 * index0], object.attrib.vertices[3 * index0 + 1], object.attrib.vertices[3 * index0 + 2]);
-		Vector point1(object.attrib.vertices[3 * index1], object.attrib.vertices[3 * index1 + 1], object.attrib.vertices[3 * index1 + 2]);
-		Vector point2(object.attrib.vertices[3 * index2], object.attrib.vertices[3 * index2 + 1], object.attrib.vertices[3 * index2 + 2]);
+			int index0 = object.shapes[0].mesh.indices[3 * triangleId].vertex_index;
+			int index1 = object.shapes[0].mesh.indices[3 * triangleId + 1].vertex_index;
+			int index2 = object.shapes[0].mesh.indices[3 * triangleId + 2].vertex_index;
+			Vector point0(object.attrib.vertices[3 * index0], object.attrib.vertices[3 * index0 + 1], object.attrib.vertices[3 * index0 + 2]);
+			Vector point1(object.attrib.vertices[3 * index1], object.attrib.vertices[3 * index1 + 1], object.attrib.vertices[3 * index1 + 2]);
+			Vector point2(object.attrib.vertices[3 * index2], object.attrib.vertices[3 * index2 + 1], object.attrib.vertices[3 * index2 + 2]);
 
-		double intersectionPoint = 0; bool flag = false;
-		rayTriangleIntersectionDetective(rayDirection, rayStartingPoint, point0, point1, point2, &intersectionPoint, &flag);
-		if (std::abs(intersectionPoint) <= 1.0e-3)
-			continue;
-		if (flag && farest < 0) {
-			intersectionPoints.insert(std::pair<double, int>(intersectionPoint, triangleId));
-			break;
+			double intersectionPoint = 0; bool flag = false;
+			rayTriangleIntersectionDetective(rayDirection, rayStartingPoint, point0, point1, point2, &intersectionPoint, &flag);
+			if (std::abs(intersectionPoint) <= 1.0e-3){
+				continue;
+			}
+			if (flag && farest < 0) {
+				intersectionPoints.insert(std::pair<double, int>(intersectionPoint, triangleId));
+				if(!flag)
+					intersectionFlag++;
+			}
+			else if(intersectionPoint < farest){
+				intersectionPoints.insert(std::pair<double, int>(intersectionPoint, triangleId));
+				if(!flag)
+					intersectionFlag++;
+			}
 		}
-		else if(intersectionPoint < farest){
-			intersectionPoints.insert(std::pair<double, int>(intersectionPoint, triangleId));
+		if(intersectionFlag)
 			break;
-		}
 	}
 
 	// no acceleration
@@ -641,7 +653,10 @@ void Scene::shade(
 	Vector trianglePoint0(object.attrib.vertices[3 * triangleIndex0], object.attrib.vertices[3 * triangleIndex0 + 1], object.attrib.vertices[3 * triangleIndex0 + 2]);
 	Vector trianglePoint1(object.attrib.vertices[3 * triangleIndex1], object.attrib.vertices[3 * triangleIndex1 + 1], object.attrib.vertices[3 * triangleIndex1 + 2]);
 	Vector trianglePoint2(object.attrib.vertices[3 * triangleIndex2], object.attrib.vertices[3 * triangleIndex2 + 1], object.attrib.vertices[3 * triangleIndex2 + 2]);
-	Vector triangleN = (trianglePoint1 - trianglePoint0) ^ (trianglePoint2 - trianglePoint0);
+	Vector trianglePoint0N(object.attrib.normals[3*triangleIndex0], object.attrib.normals[3*triangleIndex0+1], object.attrib.normals[3*triangleIndex0+2]);
+	Vector trianglePoint1N(object.attrib.normals[3*triangleIndex1], object.attrib.normals[3*triangleIndex1+1], object.attrib.normals[3*triangleIndex1+2]);
+	Vector trianglePoint2N(object.attrib.normals[3*triangleIndex2], object.attrib.normals[3*triangleIndex2+1], object.attrib.normals[3*triangleIndex2+2]);
+	Vector triangleN = (trianglePoint0N + trianglePoint1N + trianglePoint2N)/3;
 	triangleN.normalize();
 
 	// 1. direct result
@@ -654,10 +669,99 @@ void Scene::shade(
 		if (light2Facets[lightId].size() <= 50) {
 			//TODO
 			// 若光源由少量三角面片组成，采样应采用发射多条光线的方法
+			for(int i = 0; i < light2Facets[lightId].size(); i++){
+				int pathSampleNum = 10;
+				if(object.materials[triangleMtlId].specular[0] > 0.001)
+					pathSampleNum = light2Facets[lightId].size() / 10;
+				double facetr = 0, facetg = 0, facetb = 0;
+				for(int sample = 0; sample < pathSampleNum; ){
+					Vector pathStartingPoint = p;
+					Vector pathDirection(distrt(eng), distrt(eng), distrt(eng));
+					pathDirection.normalize();
+					if(triangleN*pathDirection < 0){
+						pathDirection.x = -pathDirection.x;
+						pathDirection.y = -pathDirection.y;
+						pathDirection.z = -pathDirection.z;
+					}
+
+					int facetId = light2Facets[lightId][i];
+					int lightIndex0 = object.shapes[0].mesh.indices[3 * facetId].vertex_index;
+					int lightIndex1 = object.shapes[0].mesh.indices[3 * facetId + 1].vertex_index;
+					int lightIndex2 = object.shapes[0].mesh.indices[3 * facetId + 2].vertex_index;
+					Vector lightPoint0(object.attrib.vertices[3 * lightIndex0], object.attrib.vertices[3 * lightIndex0 + 1], object.attrib.vertices[3 * lightIndex0 + 2]);
+					Vector lightPoint1(object.attrib.vertices[3 * lightIndex1], object.attrib.vertices[3 * lightIndex1 + 1], object.attrib.vertices[3 * lightIndex1 + 2]);
+					Vector lightPoint2(object.attrib.vertices[3 * lightIndex2], object.attrib.vertices[3 * lightIndex2 + 1], object.attrib.vertices[3 * lightIndex2 + 2]);
+					Vector lightN = (lightPoint1 - lightPoint0) ^ (lightPoint2 - lightPoint0);
+					lightN.normalize();
+
+					double intersectionAffine = 0;
+					bool flag = true;
+					rayTriangleIntersectionDetective(pathDirection, pathStartingPoint, lightPoint0, lightPoint1, lightPoint2, &intersectionAffine, &flag);
+					if(!flag)
+						continue;
+
+					sample++;
+
+					Vector intersectionPoint = pathStartingPoint + intersectionAffine*pathDirection;
+					Vector occlude; int occludeTriId = -1;
+		    		double farest = (intersectionPoint.x - p.x) / pathDirection.x;
+					rayObjectIntersecionDetective(pathDirection, pathStartingPoint, &occlude, &occludeTriId, farest);
+					if (!(occludeTriId == -1)) {
+						// if occlude, no shading
+						continue;
+					}
+
+					// square of distance
+					double distance2
+						= (intersectionPoint.x - p.x) * (intersectionPoint.x - p.x)
+						+ (intersectionPoint.y - p.y) * (intersectionPoint.y - p.y)
+						+ (intersectionPoint.z - p.z) * (intersectionPoint.z - p.z);
+					// cos(theta) and cos(theta')
+					double costheta = pathDirection * triangleN; costheta = std::abs(costheta);
+					double costhetat = (Vector(0, 0, 0) - pathDirection) * lightN; costhetat = std::abs(costhetat);
+
+					// calculate the area of the light
+					double area = 1.0e-6;
+
+					// specular radiance
+#ifdef ENABLE_SPECULAR
+					// the half vector
+					Vector halfVector = intersectionPoint - p; halfVector.normalize();
+					halfVector = halfVector - rayDirection; halfVector.normalize();
+
+					double cosalpha = std::max(0.0, triangleN * halfVector);
+
+					double shi = object.materials[triangleMtlId].shininess;
+					double specr = object.materials[triangleMtlId].specular[0] * light.lights[lightId].radiance.x * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
+					double specg = object.materials[triangleMtlId].specular[1] * light.lights[lightId].radiance.y * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
+					double specb = object.materials[triangleMtlId].specular[2] * light.lights[lightId].radiance.z * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
+					facetr += specr;
+					facetg += specg;
+					facetb += specb;
+#endif
+					// diffuse radiance
+					facetr += light.lights[lightId].radiance.x * (object.materials[triangleMtlId].diffuse[0] / PI) *costheta * costhetat / distance2 / (1 / area);
+					facetg += light.lights[lightId].radiance.y * (object.materials[triangleMtlId].diffuse[1] / PI) *costheta * costhetat / distance2 / (1 / area);
+					facetb += light.lights[lightId].radiance.z * (object.materials[triangleMtlId].diffuse[2] / PI) *costheta * costhetat / distance2 / (1 / area);
+				}
+				facetr /= (double)pathSampleNum;
+				facetg /= (double)pathSampleNum;
+				facetb /= (double)pathSampleNum;
+			
+				facetr = facetr * (double)light2Facets[lightId].size();
+				facetg = facetg * (double)light2Facets[lightId].size();
+				facetb = facetb * (double)light2Facets[lightId].size();	
+
+				lightr += facetr;
+				lightg += facetg;
+				lightb += facetb;	
+			}
 		}
 		else {
 			// 若光源由多数三角面片组成，采样应采用对三角面片采样的方法
-			int lightSampleNum = 10;
+			int lightSampleNum = light2Facets[lightId].size() / 80;
+			//if(object.materials[triangleMtlId].specular[0] > 0.001)
+				//lightSampleNum = light2Facets[lightId].size() / 10;
 			for (int sample = 0; sample < lightSampleNum; sample++) {
 				// choose a facet randomly
 				int facetId = std::rand() % light2Facets[lightId].size();
@@ -669,13 +773,15 @@ void Scene::shade(
 				Vector lightPoint0(object.attrib.vertices[3 * lightIndex0], object.attrib.vertices[3 * lightIndex0 + 1], object.attrib.vertices[3 * lightIndex0 + 2]);
 				Vector lightPoint1(object.attrib.vertices[3 * lightIndex1], object.attrib.vertices[3 * lightIndex1 + 1], object.attrib.vertices[3 * lightIndex1 + 2]);
 				Vector lightPoint2(object.attrib.vertices[3 * lightIndex2], object.attrib.vertices[3 * lightIndex2 + 1], object.attrib.vertices[3 * lightIndex2 + 2]);
+				Vector lightPoint0N(object.attrib.normals[3*lightIndex0], object.attrib.normals[3*lightIndex0+1], object.attrib.normals[3*lightIndex0+2]);
+				Vector lightPoint1N(object.attrib.normals[3*lightIndex1], object.attrib.normals[3*lightIndex1+1], object.attrib.normals[3*lightIndex1+2]);
+				Vector lightPoint2N(object.attrib.normals[3*lightIndex2], object.attrib.normals[3*lightIndex2+1], object.attrib.normals[3*lightIndex2+2]);
 				Vector lightCenterPoint = (lightPoint0 + lightPoint1 + lightPoint2) / 3;
-				Vector lightN = (lightPoint1 - lightPoint0) ^ (lightPoint2 - lightPoint0);
+				Vector lightN = (lightPoint0N + lightPoint1N + lightPoint2N)/3;
 				lightN.normalize();
 
+				// make sure no occlude between the shading point and the light facet
 				Vector path = lightCenterPoint - p; path.normalize();
-
-				// make sure no occlude between the shading point and the light facet 
 				Vector occlude; int occludeTriId = -1;
 		    	double farest = (lightCenterPoint.x - p.x) / path.x;
 				rayObjectIntersecionDetective(path, p, &occlude, &occludeTriId, farest);
@@ -684,38 +790,21 @@ void Scene::shade(
 					continue;
 				}
 
-				// square of distance
-				double distance2
-					= (lightCenterPoint.x - p.x) * (lightCenterPoint.x - p.x)
-					+ (lightCenterPoint.y - p.y) * (lightCenterPoint.y - p.y)
-					+ (lightCenterPoint.z - p.z) * (lightCenterPoint.z - p.z);
-				// cos(theta) and cos(theta')
-				double costheta = path * triangleN; costheta = std::abs(costheta);
-				double costhetat = (Vector(0, 0, 0) - path) * lightN; costhetat = std::abs(costhetat);
-
 				// calculate the area of the light
 				double area = getArea(lightPoint0, lightPoint1, lightPoint2);
+				double r = 0, g = 0, b = 0;
 
-				// specular radiance
-#ifdef ENABLE_SPECULAR
-				// the half vector
-				Vector halfVector = lightCenterPoint - p; halfVector.normalize();
-				halfVector = halfVector - rayDirection; halfVector.normalize();
+				calDirRadiance(
+					p, triangleN, triangleMtlId, 
+					lightCenterPoint, lightN, 
+					rayDirection, 
+					light.lights[lightId].radiance.x, light.lights[lightId].radiance.y, light.lights[lightId].radiance.z,
+					area, &r, &g, &b
+				);
 
-				double cosalpha = std::max(0.0, triangleN * halfVector);
-
-				double shi = object.materials[triangleMtlId].shininess;
-				double specr = object.materials[triangleMtlId].specular[0] * light.lights[lightId].radiance.x * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);
-				double specg = object.materials[triangleMtlId].specular[1] * light.lights[lightId].radiance.y * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);
-				double specb = object.materials[triangleMtlId].specular[2] * light.lights[lightId].radiance.z * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);
-				lightr += specr;
-				lightg += specg;
-				lightb += specb;
-#endif
-				// diffuse radiance
-				lightr += light.lights[lightId].radiance.x * (object.materials[triangleMtlId].diffuse[0] / PI) *costheta * costhetat / distance2 / (1 / area);
-				lightg += light.lights[lightId].radiance.y * (object.materials[triangleMtlId].diffuse[1] / PI) *costheta * costhetat / distance2 / (1 / area);
-				lightb += light.lights[lightId].radiance.z * (object.materials[triangleMtlId].diffuse[2] / PI) *costheta * costhetat / distance2 / (1 / area);
+				lightr += r;
+				lightg += g;
+				lightb += b;
 			}
 			lightr /= (double)lightSampleNum;
 			lightg /= (double)lightSampleNum;
@@ -729,71 +818,6 @@ void Scene::shade(
 		dirg += lightg;
 		dirb += lightb;
 	}
-	
-	/*
-	// for every light facet
-	for (int ii = 0; ii < lightFacets.size(); ii++) {
-		// the light facet
-		int lightIndex0 = object.shapes[0].mesh.indices[3 * lightFacets[ii].first].vertex_index;
-		int lightIndex1 = object.shapes[0].mesh.indices[3 * lightFacets[ii].first + 1].vertex_index;
-		int lightIndex2 = object.shapes[0].mesh.indices[3 * lightFacets[ii].first + 2].vertex_index;
-		Vector lightPoint0(object.attrib.vertices[3 * lightIndex0], object.attrib.vertices[3 * lightIndex0 + 1], object.attrib.vertices[3 * lightIndex0 + 2]);
-		Vector lightPoint1(object.attrib.vertices[3 * lightIndex1], object.attrib.vertices[3 * lightIndex1 + 1], object.attrib.vertices[3 * lightIndex1 + 2]);
-		Vector lightPoint2(object.attrib.vertices[3 * lightIndex2], object.attrib.vertices[3 * lightIndex2 + 1], object.attrib.vertices[3 * lightIndex2 + 2]);
-		Vector lightCenterPoint = (lightPoint0 + lightPoint1 + lightPoint2) / 3;
-		Vector lightN = (lightPoint1 - lightPoint0) ^ (lightPoint2 - lightPoint0);
-		lightN.normalize();
-
-		Vector path = lightCenterPoint - p; path.normalize();
-
-		// (1)make sure no occlude between the point and light
-		// TODO
-		//Vector occlude; int occludeTriId = -1;
-		//double farest = (lightCenterPoint.x - p.x) / path.x;
-		//rayObjectIntersecionDetective(path, p, &occlude, &occludeTriId, farest);
-		//if (!(occludeTriId == -1)) {
-			// occlude
-		//	continue;
-		//}
-
-		// (2)specular radiance
-		//    calculate distance, theta and theta'
-		double distance2
-			= (lightCenterPoint.x - p.x) * (lightCenterPoint.x - p.x)
-			+ (lightCenterPoint.y - p.y) * (lightCenterPoint.y - p.y)
-			+ (lightCenterPoint.z - p.z) * (lightCenterPoint.z - p.z);
-		double costheta = path * triangleN; costheta = std::abs(costheta);
-		double costhetat = (Vector(0, 0, 0) - path) * lightN; costhetat = std::abs(costhetat);
-
-		//    calculate the area of the light
-		double area = getArea(lightPoint0, lightPoint1, lightPoint2);
-
-#ifdef ENABLE_SPECULAR
-		Vector halfVector = lightCenterPoint - p; halfVector.normalize();
-		halfVector = halfVector - rayDirection; halfVector.normalize();
-		double cosalpha = std::max(0.0, triangleN * halfVector); 
-		double shi = object.materials[triangleMtlId].shininess;
-		double specr = object.materials[triangleMtlId].specular[0] * light.lights[lightFacets[ii].second].radiance.x * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);;
-		double specg = object.materials[triangleMtlId].specular[1] * light.lights[lightFacets[ii].second].radiance.y * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);;
-		double specb = object.materials[triangleMtlId].specular[2] * light.lights[lightFacets[ii].second].radiance.z * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);;
-		dirr += specr;
-		dirg += specg;
-		dirb += specb;
-#endif
-		// (3)diffuse radiance
-
-		//double a[2]; double b[2]; double c[2];
-		//projection(lightPoint0, lightPoint1, lightPoint2, lightPoint0, &a[0], &a[1]);
-		//projection(lightPoint0, lightPoint1, lightPoint2, lightPoint1, &b[0], &b[1]);
-		//projection(lightPoint0, lightPoint1, lightPoint2, lightPoint2, &c[0], &c[1]);
-		//double area = std::abs(orient2dfast(a, b, c));
-
-		//    calculate the radiance
-		dirr += light.lights[lightFacets[ii].second].radiance.x * (object.materials[triangleMtlId].diffuse[0] / PI) *costheta * costhetat / distance2 / (1 / area);
-		dirg += light.lights[lightFacets[ii].second].radiance.y * (object.materials[triangleMtlId].diffuse[1] / PI) *costheta * costhetat / distance2 / (1 / area);
-		dirb += light.lights[lightFacets[ii].second].radiance.z * (object.materials[triangleMtlId].diffuse[2] / PI) *costheta * costhetat / distance2 / (1 / area);
-	}
-	*/
 
 	// effective the direct radiance
 	resultr += dirr;
@@ -819,6 +843,11 @@ void Scene::shade(
 		Vector indirRayStartingPoint = p;
 		Vector indirRayDirection(distrt(eng), distrt(eng), distrt(eng));
 		indirRayDirection.normalize();
+		if(indirRayDirection * triangleN < 0){
+			indirRayDirection.x = -indirRayDirection.x;
+			indirRayDirection.y = -indirRayDirection.y;
+			indirRayDirection.z = -indirRayDirection.z;
+		}
 
 		// tell if there is new intersection 
 		Vector* newp = new Vector; int newtriId = -1;
@@ -847,17 +876,17 @@ void Scene::shade(
 				double costheta = std::abs(triangleN * indirRayDirection);
 				indirr = indirwor * (object.materials[triangleMtlId].diffuse[0] / PI) * costheta / (0.5 / PI) / prr;
 				indirg = indirwog * (object.materials[triangleMtlId].diffuse[1] / PI) * costheta / (0.5 / PI) / prr;
-				indirg = indirwob * (object.materials[triangleMtlId].diffuse[2] / PI) * costheta / (0.5 / PI) / prr;
+				indirb = indirwob * (object.materials[triangleMtlId].diffuse[2] / PI) * costheta / (0.5 / PI) / prr;
 
 				// specular
 #ifdef ENABLE_SPECULAR
 				Vector halfVector = *newp - p; halfVector.normalize();
 				halfVector = halfVector - rayDirection; halfVector.normalize();
-				double cosalpha = std::max(0, triangleN * halfVector);
+				double cosalpha = std::max(0.0, triangleN * halfVector);
 				double shi = object.materials[triangleMtlId].shininess;
-				double specr = object.materials[triangleMtlId].specular[0] * indirwor * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);
-				double specg = object.materials[triangleMtlId].specular[1] * indirwog * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);
-				double specb = object.materials[triangleMtlId].specular[2] * indirwob * std::pow(cosalpha, shi) *costheta * costhetat / distance2 / (1 / area);
+				double specr = object.materials[triangleMtlId].specular[0] * indirwor * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
+				double specg = object.materials[triangleMtlId].specular[1] * indirwog * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
+				double specb = object.materials[triangleMtlId].specular[2] * indirwob * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
 				indirr += specr;
 				indirg += specg;
 				indirg += specb;
@@ -881,7 +910,7 @@ void Scene::write2JPEG(const char* filename) {
 	std::cout << "Writing to jpeg..." << std::endl;
 	unsigned char* colorData = new unsigned char[camera.height*camera.width * 3];
 	for (int ii = 0; ii < camera.height; ii++) {
-		for (int jj = 0; jj < camera.width; jj++) {
+		for (int jj = 0; jj < camera.width; jj++) {					
 			colorData[3 * ii*camera.width + 3 * jj] = std::round(255.0 * pixelsr[camera.width*ii + jj]);
 			colorData[3 * ii*camera.width + 3 * jj + 1] = std::round(255.0 * pixelsg[camera.width*ii + jj]);
 			colorData[3 * ii*camera.width + 3 * jj + 2] = std::round(255.0 * pixelsb[camera.width*ii + jj]);
@@ -937,8 +966,8 @@ void Scene::buildGrids() {
 	maxx += 5.0; maxy += 5.0; maxz += 5.0;
 	minx -= 5.0; miny -= 5.0; minz -= 5.0;
 	Vector mygridscp((minx + maxx) / 2, (miny + maxy) / 2, (minz + maxz) / 2);
-	Vector mygridsrange((maxx - minx) / 2, (maxx - minx) / 2, (maxz - minz) / 2);
-	mygrids = new myGrids(mygridscp, mygridsrange, 50, 50, 50);
+	Vector mygridsrange((maxx - minx) / 2, (maxy - miny) / 2, (maxz - minz) / 2);
+	mygrids = new myGrids(mygridscp, mygridsrange, 100, 100, 100);
 
 	for (int i = 0; i < object.shapes[0].mesh.num_face_vertices.size(); i++) {
 		// this triangle
@@ -954,7 +983,7 @@ void Scene::buildGrids() {
 
 void Scene::getPIntersectionTriangles(
 	const Vector& rayDirection, const Vector& rayStartingPoint,
-	std::vector<int>& trianglesId
+	std::vector< std::vector<int> >& trianglesId
 ) {
 	trianglesId.clear();
 
@@ -997,12 +1026,50 @@ void Scene::getPIntersectionTriangles(
 		start = end;
 	} while (mygrids->inGrids(start) || mygrids->inGrids(end));
 
+	trianglesId.clear();
 	for (int i = 0; i < gridsId.size(); i++) {
 		std::vector<int>& tris = mygrids->grids[gridsId[i]].elmsId;
-		for (int j = 0; j < tris.size(); j++) {
-			trianglesId.push_back(tris[j]);
-		}
+		if(tris.empty())
+			continue;
+		trianglesId.push_back(tris);
 	}
+}
+
+void Scene::calDirRadiance(
+	const Vector& p, const Vector& pNormal, const int& pMaterial,
+	const Vector& lightCenter, const Vector& lightNormal,
+	const Vector& ray,
+	const double& lightr, const double& lightg, const double& lightb, const double& lightarea,
+	double* r, double* g, double* b
+){
+	*r = 0; *g = 0; *b = 0;
+	//get square of distance
+	double distance2 = (p.x - lightCenter.x)*(p.x - lightCenter.x) + (p.y - lightCenter.y)*(p.y - lightCenter.y) + (p.z - lightCenter.z)*(p.z - lightCenter.z);
+
+	//get cos(theta), cos(theta')
+	Vector path = lightCenter - p; path.normalize();
+	double costheta = std::max(0.0, path*pNormal);
+	double costheta_ = std::max(0.0, (Vector(0, 0, 0) - path) * lightNormal);
+
+	//get area of light
+
+	// diffuse radiance
+	*r += lightr * object.materials[pMaterial].diffuse[0] / PI * costheta * costheta_ * lightarea / distance2;
+	*g += lightg * object.materials[pMaterial].diffuse[1] / PI * costheta * costheta_ * lightarea / distance2;
+	*b += lightb * object.materials[pMaterial].diffuse[2] / PI * costheta * costheta_ * lightarea / distance2;
+
+	//half vector
+	Vector halfVector = path - ray;
+	halfVector.normalize();
+	double cosalpha = halfVector * pNormal;
+	cosalpha = std::max(0.0, 2*cosalpha*cosalpha - 1);
+
+	int shi = object.materials[pMaterial].shininess;
+
+	// specular radiance
+	*r += lightr * object.materials[pMaterial].specular[0] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
+	*g += lightg * object.materials[pMaterial].specular[1] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
+	*b += lightg * object.materials[pMaterial].specular[2] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
 }
 
 #endif

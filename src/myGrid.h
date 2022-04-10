@@ -92,13 +92,13 @@ void myGrids::insertATriangle(const Vector& point0, const Vector& point1, const 
 	double maxx = std::max(point0.x, point1.x), maxy = std::max(point0.y, point1.y), maxz = std::max(point0.z, point1.z);
 	double minx = std::min(point0.x, point1.x), miny = std::min(point0.y, point1.y), minz = std::min(point0.z, point1.z);
 	maxx = std::max(maxx, point2.x), maxy = std::max(maxy, point2.y), maxz = std::max(maxz, point2.z);
-	minx = std::min(maxx, point2.x), miny = std::min(maxy, point2.y), minz = std::min(maxz, point2.z);
+	minx = std::min(minx, point2.x), miny = std::min(miny, point2.y), minz = std::min(minz, point2.z);
 
-	int xStartId = std::round((minx - (centerPoint.x - rangeXYZ.x)) / (gridLengthXYZ.x * 2) + 0.5);
+	int xStartId = (int)((minx - (centerPoint.x - rangeXYZ.x)) / (gridLengthXYZ.x * 2));
 	int xEndId = std::round((maxx - (centerPoint.x - rangeXYZ.x)) / (gridLengthXYZ.x * 2) + 0.5);
-	int yStartId = std::round((miny - (centerPoint.y - rangeXYZ.y)) / (gridLengthXYZ.y * 2) + 0.5);
+	int yStartId = (int)((miny - (centerPoint.y - rangeXYZ.y)) / (gridLengthXYZ.y * 2));
 	int yEndId = std::round((maxy - (centerPoint.y - rangeXYZ.y)) / (gridLengthXYZ.y * 2) + 0.5);
-	int zStartId = std::round((minz - (centerPoint.z - rangeXYZ.z)) / (gridLengthXYZ.z * 2) + 0.5);
+	int zStartId = (int)((minz - (centerPoint.z - rangeXYZ.z)) / (gridLengthXYZ.z * 2));
 	int zEndId = std::round((maxz - (centerPoint.z - rangeXYZ.z)) / (gridLengthXYZ.z * 2) + 0.5);
 
 	for (int i = xStartId; i < xEndId + 1; i++) {
