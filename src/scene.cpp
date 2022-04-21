@@ -182,6 +182,11 @@ std::default_random_engine eng(rd());
 std::uniform_real_distribution<> distr(0, 1);
 
 /**
+ * @brief generate a random double between 0 and 0.5
+ */
+std::uniform_real_distribution<> rand05(0, 0.5);
+
+/**
  * @brief generate a random double between -1 and 1
  */
 std::uniform_real_distribution<> distrt(-1, 1);
@@ -246,7 +251,7 @@ void Scene::MonteCarloPathTracer() {
 		double lineStart = clock();
 		for (int jj = 0; jj < camera.width; jj++) {
 			// sample times
-			int sampleTimes = 10;
+			int sampleTimes = 5;
 
 			Vector pixel = screenCenter - (double)(ii - camera.height / 2) * up - (double)(jj - camera.width / 2)*side;
 
@@ -270,14 +275,13 @@ void Scene::MonteCarloPathTracer() {
 				rayObjectIntersecionDetective(rayDirection, camera.eye, &p, &triangleId);
 
 				// if no intersection, set this pixel background color
-				// TODO
 				if (triangleId == -1) {
 					wor += 0.0;
 					wog += 0.0;
 					wob += 0.0;
 				}
 
-				// 2. shading the intersection point
+				// 2. if intersection, shading the intersection point
 				else {
 					double thiswor = 0, thiswog = 0, thiswob = 0;
 
@@ -522,23 +526,13 @@ void Scene::shade(
 	for (int lightId = 0; lightId < light.lights.size(); lightId++) {
 		double lightr = 0, lightg = 0, lightb = 0;
 		if (light2Facets[lightId].size() <= 50) {
-			//TODO
 			// 若光源由少量三角面片组成，采样应采用发射多条光线的方法
 			for(int i = 0; i < light2Facets[lightId].size(); i++){
-				int pathSampleNum = 10;
+				int pathSampleNum = 5;
 				if(object.materials[triangleMtlId].specular[0] > 0.001)
 					pathSampleNum = light2Facets[lightId].size() / 10;
 				double facetr = 0, facetg = 0, facetb = 0;
 				for(int sample = 0; sample < pathSampleNum; ){
-					Vector pathStartingPoint = p;
-					Vector pathDirection(distrt(eng), distrt(eng), distrt(eng));
-					pathDirection.normalize();
-					if(triangleN*pathDirection < 0){
-						pathDirection.x = -pathDirection.x;
-						pathDirection.y = -pathDirection.y;
-						pathDirection.z = -pathDirection.z;
-					}
-
 					int facetId = light2Facets[lightId][i];
 					int lightIndex0 = object.shapes[0].mesh.indices[3 * facetId].vertex_index;
 					int lightIndex1 = object.shapes[0].mesh.indices[3 * facetId + 1].vertex_index;
@@ -546,14 +540,29 @@ void Scene::shade(
 					Vector lightPoint0(object.attrib.vertices[3 * lightIndex0], object.attrib.vertices[3 * lightIndex0 + 1], object.attrib.vertices[3 * lightIndex0 + 2]);
 					Vector lightPoint1(object.attrib.vertices[3 * lightIndex1], object.attrib.vertices[3 * lightIndex1 + 1], object.attrib.vertices[3 * lightIndex1 + 2]);
 					Vector lightPoint2(object.attrib.vertices[3 * lightIndex2], object.attrib.vertices[3 * lightIndex2 + 1], object.attrib.vertices[3 * lightIndex2 + 2]);
-					Vector lightN = (lightPoint1 - lightPoint0) ^ (lightPoint2 - lightPoint0);
+					Vector lightPoint0N(object.attrib.normals[3*lightIndex0], object.attrib.normals[3*lightIndex0+1], object.attrib.normals[3*lightIndex0+2]);
+					Vector lightPoint1N(object.attrib.normals[3*lightIndex1], object.attrib.normals[3*lightIndex1+1], object.attrib.normals[3*lightIndex1+2]);
+					Vector lightPoint2N(object.attrib.normals[3*lightIndex2], object.attrib.normals[3*lightIndex2+1], object.attrib.normals[3*lightIndex2+2]);
+
+					Vector pathStartingPoint = p;
+					double coefficient0 = rand05(eng), coefficient1 = rand05(eng);
+					Vector pathEndPoint = coefficient0*lightPoint0 + coefficient1*lightPoint1 + (1-coefficient0-coefficient1)*lightPoint2;
+					Vector pathDirection = pathEndPoint - pathStartingPoint;
+					pathDirection.normalize();
+					Vector lightN = coefficient0*lightPoint0N + coefficient1*lightPoint1N + (1-coefficient0-coefficient1)*lightPoint2N;
 					lightN.normalize();
+
+					//if(triangleN*pathDirection < 0){
+					//	pathDirection.x = -pathDirection.x;
+					//	pathDirection.y = -pathDirection.y;
+					//	pathDirection.z = -pathDirection.z;
+					//}
 
 					double intersectionAffine = 0;
 					bool flag = true;
-					rayTriangleIntersectionDetective(pathDirection, pathStartingPoint, lightPoint0, lightPoint1, lightPoint2, &intersectionAffine, &flag);
-					if(!flag)
-						continue;
+					//rayTriangleIntersectionDetective(pathDirection, pathStartingPoint, lightPoint0, lightPoint1, lightPoint2, &intersectionAffine, &flag);
+					//if(!flag)
+					//	continue;
 
 					sample++;
 
@@ -567,37 +576,51 @@ void Scene::shade(
 					}
 
 					// square of distance
-					double distance2
-						= (intersectionPoint.x - p.x) * (intersectionPoint.x - p.x)
-						+ (intersectionPoint.y - p.y) * (intersectionPoint.y - p.y)
-						+ (intersectionPoint.z - p.z) * (intersectionPoint.z - p.z);
+					//double distance2
+					//	= (intersectionPoint.x - p.x) * (intersectionPoint.x - p.x)
+					//	+ (intersectionPoint.y - p.y) * (intersectionPoint.y - p.y)
+					//	+ (intersectionPoint.z - p.z) * (intersectionPoint.z - p.z);
 					// cos(theta) and cos(theta')
-					double costheta = pathDirection * triangleN; costheta = std::abs(costheta);
-					double costhetat = (Vector(0, 0, 0) - pathDirection) * lightN; costhetat = std::abs(costhetat);
+					//double costheta = pathDirection * triangleN; costheta = std::abs(costheta);
+					//double costhetat = (Vector(0, 0, 0) - pathDirection) * lightN; costhetat = std::abs(costhetat);
 
 					// calculate the area of the light
-					double area = 1.0e-6;
+					//double area = 1.0e-3;
+					double area = getArea(lightPoint0, lightPoint1, lightPoint2);
 
 					// specular radiance
-#ifdef ENABLE_SPECULAR
+//#ifdef ENABLE_SPECULAR
 					// the half vector
-					Vector halfVector = intersectionPoint - p; halfVector.normalize();
-					halfVector = halfVector - rayDirection; halfVector.normalize();
+					//Vector halfVector = intersectionPoint - p; halfVector.normalize();
+					//halfVector = halfVector - rayDirection; halfVector.normalize();
 
-					double cosalpha = std::max(0.0, triangleN * halfVector);
+					//double cosalpha = std::max(0.0, triangleN * halfVector);
+					
+					double r = 0, g = 0,b = 0;
+					calDirRadiance(
+						p, triangleN, triangleMtlId, 
+						pathEndPoint, lightN, 
+						rayDirection, 
+						light.lights[lightId].radiance.x, light.lights[lightId].radiance.y, light.lights[lightId].radiance.z,
+						area, &r, &g, &b
+					);
 
-					double shi = object.materials[triangleMtlId].shininess;
-					double specr = object.materials[triangleMtlId].specular[0] * light.lights[lightId].radiance.x * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
-					double specg = object.materials[triangleMtlId].specular[1] * light.lights[lightId].radiance.y * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
-					double specb = object.materials[triangleMtlId].specular[2] * light.lights[lightId].radiance.z * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
-					facetr += specr;
-					facetg += specg;
-					facetb += specb;
-#endif
+					facetr += r;
+					facetg += g;
+					facetb += b;
+
+					//double shi = object.materials[triangleMtlId].shininess;
+					//double specr = object.materials[triangleMtlId].specular[0] * light.lights[lightId].radiance.x * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
+					//double specg = object.materials[triangleMtlId].specular[1] * light.lights[lightId].radiance.y * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
+					//double specb = object.materials[triangleMtlId].specular[2] * light.lights[lightId].radiance.z * std::pow(cosalpha, shi) * costheta* costhetat / distance2 / (1 / area);
+					//facetr += specr;
+					//facetg += specg;
+					//facetb += specb;
+//#endif
 					// diffuse radiance
-					facetr += light.lights[lightId].radiance.x * (object.materials[triangleMtlId].diffuse[0] / PI) *costheta * costhetat / distance2 / (1 / area);
-					facetg += light.lights[lightId].radiance.y * (object.materials[triangleMtlId].diffuse[1] / PI) *costheta * costhetat / distance2 / (1 / area);
-					facetb += light.lights[lightId].radiance.z * (object.materials[triangleMtlId].diffuse[2] / PI) *costheta * costhetat / distance2 / (1 / area);
+					//facetr += light.lights[lightId].radiance.x * (object.materials[triangleMtlId].diffuse[0] / PI) *costheta * costhetat / distance2 / (1 / area);
+					//facetg += light.lights[lightId].radiance.y * (object.materials[triangleMtlId].diffuse[1] / PI) *costheta * costhetat / distance2 / (1 / area);
+					//facetb += light.lights[lightId].radiance.z * (object.materials[triangleMtlId].diffuse[2] / PI) *costheta * costhetat / distance2 / (1 / area);
 				}
 				facetr /= (double)pathSampleNum;
 				facetg /= (double)pathSampleNum;
@@ -611,6 +634,7 @@ void Scene::shade(
 				lightg += facetg;
 				lightb += facetb;	
 			}
+
 		}
 		else {
 			// 若光源由多数三角面片组成，采样应采用对三角面片采样的方法
@@ -904,7 +928,8 @@ void Scene::calDirRadiance(
 	//get cos(theta), cos(theta')
 	Vector path = lightCenter - p; path.normalize();
 	double costheta = std::max(0.0, path*pNormal);
-	double costheta_ = std::max(0.0, (Vector(0, 0, 0) - path) * lightNormal);
+	//double costheta_ = std::max(0.0, (Vector(0, 0, 0) - path) * lightNormal);
+	double costheta_ = std::abs((Vector(0, 0, 0) - path) * lightNormal);
 
 	//get area of light
 

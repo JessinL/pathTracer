@@ -1,9 +1,11 @@
+# build files
 build/
 release/
+bin/
 
-tinyobjloader/
-
+# vscode files
 .vscode/
 
+# other files
 doc/
 MonteCarloPathTracer

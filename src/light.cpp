@@ -33,6 +33,7 @@ int Light::readXmlFile(const char* filename) {
 			}
 		}
 		OneLight light;
+		
 		light.name = tempstr.substr(begin + 1, end - begin - 1);
 		tempstr = tempstr.substr(end + 1, tempstr.size() - 1);
 		std::vector<double> words = string2Doubles(tempstr);

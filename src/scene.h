@@ -8,8 +8,6 @@
 
 #include <time.h>
 #include <set>
-//#include "OcTree.h"
-//#include "OcTree.cpp"
 #include "myGrid.h"
 
 #define PI 3.1415926535
@@ -22,14 +20,13 @@
 //#define ENABLE_INDIRECT_LIGHT
 
 /**
- * @brief scene class
+ * @brief scene class, represent a scene with triangle mesh objects and lights
  * @note based on tinyobjloader, https://github.com/tinyobjloader/tinyobjloader
  * @note bases on std_image, https://github.com/nothings/stb/blob/master/stb_image.h
  * @author Liu Zhixing, liuzhixing@zju.edu.cn
  */
 class Scene {
 public:
-	
 	Scene() {}
 	~Scene() {
 		if (mygrids != nullptr)
@@ -122,6 +119,23 @@ public:
 		std::vector< std::vector<int> >& trianglesId
 	);
 
+	/**
+	 * @brief to solve the rendering equation
+	 * 
+	 * @param p 
+	 * @param pNormal 
+	 * @param pMaterial 
+	 * @param lightCenter 
+	 * @param lightNormal 
+	 * @param ray 
+	 * @param lightr 
+	 * @param lightg 
+	 * @param lightb 
+	 * @param lightarea 
+	 * @param r the result radiance
+	 * @param g the result radiance
+	 * @param b the result radiance
+	 */
 	void calDirRadiance(
 		const Vector& p, const Vector& pNormal, const int& pMaterial,
 		const Vector& lightCenter, const Vector& lightNormal,

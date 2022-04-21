@@ -4,10 +4,10 @@
 
 int main() {
 	Scene* scene = new Scene;
-	scene->readScene("../cases/veach-mis/veach-mis");
+	scene->readScene("../cases/cornell-box/cornell-box");
 	scene->getLightFacets();
 	scene->MonteCarloPathTracer();
-	scene->write2JPEG("../cases/veach-mis/veach-mis.jpg");
+	scene->write2JPEG("../cases/cornell-box/cornell-box.jpg");
 
 	return 0;
 }
