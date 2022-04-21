@@ -19,6 +19,8 @@ public:
     int setleftchild(bvhNode_* child);
     int setrightchild(bvhNode_* child);
 
+    int setdepth(const int& depth);
+
     /**
      * @brief set some facets to a leaf node
      * @note only leaf node could be set
@@ -36,6 +38,8 @@ public:
 
     bvhNode_* getleftchild();
     bvhNode_* getrightchild();
+
+    int getdepth();
 
     std::vector<int> getfacetids();
 
@@ -55,6 +59,7 @@ private:
     bvhNode_* leftchild_{nullptr};
     bvhNode_* rightchild_{nullptr};
     int divideaxis_{-1};
+    int depth_{-1};
 
     // for leaf nodes
     std::vector<int> facetids_;

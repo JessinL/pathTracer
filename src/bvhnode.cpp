@@ -42,6 +42,11 @@ int bvhNode_::setrightchild(bvhNode_* child){
     return 0;
 }
 
+int bvhNode_::setdepth(const int& depth){
+    depth_ = depth;
+    return 0;
+}
+
 int bvhNode_::setfacets(const std::vector<int>& facetids){
     if(!isleaf_)
         return 1;
@@ -63,6 +68,10 @@ bool bvhNode_::isleaf(){
 
 bool bvhNode_::isinternal(){
     return !isleaf_;
+}
+
+int bvhNode_::getdepth(){
+    return depth_;
 }
 
 bvhNode_* bvhNode_::getleftchild(){
@@ -94,11 +103,13 @@ int bvhNode_::divide(
     leftchild->setmaxxyz(leftmaxxyz);
     leftchild->setminxyz(leftminxyz);
     leftchild->setfacets(leftfacetids);
+    leftchild->setdepth(getdepth() + 1);
 
     bvhNode_* rightchild = new bvhNode_();
     rightchild->setmaxxyz(rightmaxxyz);
     rightchild->setminxyz(rightminxyz);
     rightchild->setfacets(rightfacetids);
+    rightchild->setdepth(getdepth() + 1);
 
     setleftchild(leftchild);
     setrightchild(rightchild);

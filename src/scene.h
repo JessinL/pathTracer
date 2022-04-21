@@ -8,7 +8,12 @@
 
 #include <time.h>
 #include <set>
+
+#ifdef USE_GRIDS
 #include "myGrid.h"
+#endif 
+
+#include "bvhtree.h"
 
 #define PI 3.1415926535
 #define REAL double
@@ -21,16 +26,18 @@
 
 /**
  * @brief scene class, represent a scene with triangle mesh objects and lights
- * @note based on tinyobjloader, https://github.com/tinyobjloader/tinyobjloader
- * @note bases on std_image, https://github.com/nothings/stb/blob/master/stb_image.h
+ * @note obj file i based on tinyobjloader, https://github.com/tinyobjloader/tinyobjloader
+ * @note jpg file o bases on std_image, https://github.com/nothings/stb/blob/master/stb_image.h
  * @author Liu Zhixing, liuzhixing@zju.edu.cn
  */
 class Scene {
 public:
 	Scene() {}
 	~Scene() {
+#ifdef USE_GRIDS
 		if (mygrids != nullptr)
 			delete mygrids;
+#endif
 	}
 
 	/**
@@ -106,10 +113,12 @@ public:
 	*/
 	void buildPoint2Triangles();
 
+#ifdef USE_GRIDS
 	/**
 	* @brief build grids
 	*/
 	void buildGrids();
+#endif
 
 	/**
 	* @brief get possibly intersection
@@ -118,6 +127,12 @@ public:
 		const Vector& rayDirection, const Vector& rayStartingPoint,
 		std::vector< std::vector<int> >& trianglesId
 	);
+
+	/**
+	 * @brief build a bvh-tree to accelerate self-intersection detection
+	 * 
+	 */
+	void buildBVHTree();
 
 	/**
 	 * @brief to solve the rendering equation
@@ -159,7 +174,11 @@ protected:
 
 	std::vector< std::vector<int> > point2Triangles;
 
+#ifdef USE_GRIDS
 	myGrids* mygrids{ nullptr };
+#endif
+
+	bvhTree_* bvht{nullptr};
 };
 
 #endif

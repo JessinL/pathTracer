@@ -3,6 +3,7 @@
 
 #include "bvhnode.h"
 #include <algorithm>
+#include <set>
 
 class bvhTree_{
 public:
