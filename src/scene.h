@@ -2,6 +2,7 @@
 #define MONTE_CARLO_PATH_TRACER_SCENE_H_
 
 #include <random>
+#include <math.h>
 #include "light.h"
 #include "camera.h"
 #include "object.h"
@@ -9,25 +10,47 @@
 #include <time.h>
 #include <set>
 
+#define USE_IGLAABB
+#define GAMMA_CORRECTION
+
 #ifdef USE_GRIDS
 #include "myGrid.h"
-#endif 
+#endif
 
+#ifdef USE_IGLAABB
+#include <igl/AABB.h>
+#include <igl/Hit.h>
+#include <eigen/Eigen/Dense>
+#endif
+
+
+#ifndef USE_GRID
+#ifndef USE_IGLAABB
 #include "bvhtree.h"
+#endif
+#endif
 
 #define PI 3.1415926535
 #define REAL double
 
-
-#define DEBUG_LZX
-#define ENABLE_SPECULAR
+#ifdef GAMMA_CORRECTION
+#define GAMMA 2.2
+#endif
 //#define ENABLE_REFRACTION
-//#define ENABLE_INDIRECT_LIGHT
+#define ENABLE_INDIRECT_LIGHT
+
+struct texture_{
+	int materialid;
+	int type;	// 0: diffuse 1:specular
+	int width;
+	int height;
+	std::vector<double> data;
+};
 
 /**
- * @brief scene class, represent a scene with triangle mesh objects and lights
+ * @brief scene class, represent a scene consists of objects and lights, represented by triangle mesh
  * @note obj file i based on tinyobjloader, https://github.com/tinyobjloader/tinyobjloader
- * @note jpg file o bases on std_image, https://github.com/nothings/stb/blob/master/stb_image.h
+ * @note jpg file io bases on std_image, https://github.com/nothings/stb/blob/master/stb_image.h
  * @author Liu Zhixing, liuzhixing@zju.edu.cn
  */
 class Scene {
@@ -37,6 +60,15 @@ public:
 #ifdef USE_GRIDS
 		if (mygrids != nullptr)
 			delete mygrids;
+		mygrids = nullptr;
+#endif
+
+#ifndef USE_GRIDS
+#ifndef USE_IGLAABB
+		if(bvht != nullptr)
+			delete bvht;
+		bvht = nullptr;
+#endif
 #endif
 	}
 
@@ -46,9 +78,15 @@ public:
 	void readScene(const char* scenepath);
 
 	/**
+	 * @brief load textures
+	 * 
+	 */
+	void loadTextures(const char* scenepath);
+
+	/**
 	 * @brief the Monte Carlo Path Tracer
 	 */
-	void MonteCarloPathTracer();
+	void MonteCarloPathTracer(const int& sampletime, const char* logfilename);
 
 	/**
 	 * @brief tell if a ray intersects with an object made up by triangle meshes
@@ -81,6 +119,7 @@ public:
 		double* affineIntersectionPoint,
 		bool* flag
 	);
+
 	/**
 	 * @brief Monte Carlo shader
 	 * 
@@ -120,6 +159,13 @@ public:
 	void buildGrids();
 #endif
 
+#ifdef USE_IGLAABB
+	/**
+	* @brief build aabb-tree
+ 	* 
+ 	*/
+	void buildAABBTree();
+#endif
 	/**
 	* @brief get possibly intersection
 	*/
@@ -128,11 +174,15 @@ public:
 		std::vector< std::vector<int> >& trianglesId
 	);
 
+#ifndef USE_GRIDS
+#ifndef USE_IGLAABB
 	/**
 	 * @brief build a bvh-tree to accelerate self-intersection detection
 	 * 
 	 */
 	void buildBVHTree();
+#endif
+#endif
 
 	/**
 	 * @brief to solve the rendering equation
@@ -152,10 +202,19 @@ public:
 	 * @param b the result radiance
 	 */
 	void calDirRadiance(
-		const Vector& p, const Vector& pNormal, const int& pMaterial,
+		const Vector& p, const int& triangleId, const Vector& pNormal, const int& pMaterial,
 		const Vector& lightCenter, const Vector& lightNormal,
 		const Vector& ray,
 		const double& lightr, const double& lightg, const double& lightb, const double& lightarea,
+		double* r, double* g, double* b
+	);
+
+	void calIndirRadiance(
+		const Vector& p, const int& triangleId, const Vector& pNormal, const int& pMaterial,
+		const Vector& newp, const Vector& indirRayDirection,
+		const double& indirRayr, const double& indirRayg, const double& indirRayb,
+		const Vector& rayDirection,
+		const double& prr,
 		double* r, double* g, double* b
 	);
 
@@ -178,7 +237,19 @@ protected:
 	myGrids* mygrids{ nullptr };
 #endif
 
+#ifdef USE_IGLAABB
+	igl::AABB<Eigen::MatrixXd, 3>* aabb{nullptr};
+	Eigen::MatrixXd VERTICES;
+	Eigen::MatrixXi FACETS;
+#endif
+
+#ifndef USE_GRIDS
+#ifndef USE_IGLAABB
 	bvhTree_* bvht{nullptr};
+#endif
+#endif
+
+	std::vector< texture_ > textures;
 };
 
 #endif

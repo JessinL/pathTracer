@@ -1,5 +1,5 @@
 #include "scene.h"
-#include "writejpg.h"
+#include "jpgio.h"
 
 /**
  * @brief returns a posituve value if d lies inside the unique circle through a, b and c
@@ -57,6 +57,15 @@ REAL getArea(const Vector& pa, const Vector& pb, const Vector& pc) {
 	double dpp = (dab + dbc + dca) / 2;
 	double area = std::sqrt(dpp*(dpp - dab)*(dpp - dbc)*(dpp - dca));
 	return area;
+}
+
+Vector getaffinecoord(const Vector& va, const Vector& vb, const Vector& vc, const Vector& vp){
+	double areapab = getArea(va, vb, vp);
+	double areapbc = getArea(vb, vc, vp);
+	double areapca = getArea(vc, va, vp);
+	double areasum = areapab + areapbc + areapca;
+	Vector result(areapbc/areasum, areapca/areasum, areapab/areasum);
+	return result;
 }
 
 /**
@@ -221,7 +230,7 @@ void Scene::readScene(const char* scenepath) {
 	return;
 }
 
-void Scene::MonteCarloPathTracer() {
+void Scene::MonteCarloPathTracer(const int& sampletime, const char* logfilename) {
 	// info of camera
 	// the distance between camera and screen
 	double distance = camera.height / (2.0 * std::tan(camera.fovy / 2.0 * PI / 180.0));
@@ -242,30 +251,36 @@ void Scene::MonteCarloPathTracer() {
 	pixelsg.resize(camera.width*camera.height);
 	pixelsb.resize(camera.width*camera.height);
 
-	//build bvh-tree to accelerate intersection detection
-	buildBVHTree();
+
 
 #ifdef USE_GRIDS
 	// build grids to accelerate intersection detection
 	buildGrids();
 #endif
 
+#ifdef USE_IGLAABB
+	buildAABBTree();
+#endif
+
+#ifndef USE_GRIDS
+#ifndef USE_IGLAABB
+	//build bvh-tree to accelerate intersection detection
+	buildBVHTree();
+#endif
+#endif
+
+	double timelog[camera.height];
 	double start = clock();
 	// for every pixel
-	//for(int ii = 250; ii < 251; ii++){
 	for (int ii = 0; ii < camera.height; ii++) {
 		double lineStart = clock();
 		for (int jj = 0; jj < camera.width; jj++) {
 			// sample times
-			int sampleTimes = 5;
+			int sampleTimes = sampletime;
 
 			Vector pixel = screenCenter - (double)(ii - camera.height / 2) * up - (double)(jj - camera.width / 2)*side;
 
 			double wor = 0, wog = 0, wob = 0;
-
-#ifdef DEBUG_LZX
-			int facetId = -1;
-#endif
 
 			// for every sample
 			for (int time = 0; time < sampleTimes; time++) {
@@ -316,13 +331,21 @@ void Scene::MonteCarloPathTracer() {
 		}
 		double lineEnd = clock();
 		double lineTime = (lineEnd - lineStart) / (double)CLOCKS_PER_SEC;
-#ifdef DEBUG_LZX
-		std::cout << "Pixel line " << ii << " shading end. Shading time: " << lineTime << 's' << std::endl; 
-#endif
+		timelog[ii] = lineTime;
+
+		if(!(ii%50))
+			std::cout << "Pixel line " << ii << " shading end. Shading time: " << lineTime << 's' << std::endl; 
+
 	}
 	double end = clock();
 	double time = (end - start) / (double)CLOCKS_PER_SEC;
 	std::cout << "Shading ends, time cost: " << time << 's' << std::endl;
+
+	std::ofstream logfp(logfilename);
+	for(int line = 0; line < camera.height; line++){
+		logfp << timelog[line] << '\n';
+	}
+	logfp.close();
 
 	return;
 }
@@ -409,14 +432,7 @@ void Scene::rayTriangleIntersectionDetective(
 		*flag = true;
 		return;
 	}
-	//else if (inside = 0) {
-	//	*affineIntersectionPoint = tt;
-	//	*flag = true;
-	//	return;
-	//}
 
-	// get the parameter coordinate of four points, and then use the orient2d
-	// I use orient2dfast here
 #ifdef USE_ORIENT2D
 	double a[2]; double b[2]; double c[2]; double p[2];
 	projection(pa, pb, pc, pp, &p[0], &p[1]);
@@ -553,7 +569,7 @@ void Scene::shade(
 					double area = getArea(lightPoint0, lightPoint1, lightPoint2);			
 					double r = 0, g = 0,b = 0;
 					calDirRadiance(
-						p, triangleN, triangleMtlId, 
+						p, triangleId, triangleN, triangleMtlId, 
 						pathEndPoint, lightN, 
 						rayDirection, 
 						light.lights[lightId].radiance.x, light.lights[lightId].radiance.y, light.lights[lightId].radiance.z,
@@ -616,7 +632,7 @@ void Scene::shade(
 				double r = 0, g = 0, b = 0;
 
 				calDirRadiance(
-					p, triangleN, triangleMtlId, 
+					p, triangleId, triangleN, triangleMtlId, 
 					lightCenterPoint, lightN, 
 					rayDirection, 
 					light.lights[lightId].radiance.x, light.lights[lightId].radiance.y, light.lights[lightId].radiance.z,
@@ -693,25 +709,36 @@ void Scene::shade(
 				double indirwor = 0, indirwog = 0, indirwob = 0;
 				shade(*newp, newtriId, indirRayDirection, indirRayStartingPoint, &indirwor, &indirwog, &indirwob);
 
-				// diffuse
-				double costheta = std::abs(triangleN * indirRayDirection);
-				indirr = indirwor * (object.materials[triangleMtlId].diffuse[0] / PI) * costheta / (0.5 / PI) / prr;
-				indirg = indirwog * (object.materials[triangleMtlId].diffuse[1] / PI) * costheta / (0.5 / PI) / prr;
-				indirb = indirwob * (object.materials[triangleMtlId].diffuse[2] / PI) * costheta / (0.5 / PI) / prr;
+				// // diffuse
+				// double costheta = std::abs(triangleN * indirRayDirection);
+				// indirr = indirwor * (object.materials[triangleMtlId].diffuse[0] / PI) * costheta / (0.5 / PI) / prr;
+				// indirg = indirwog * (object.materials[triangleMtlId].diffuse[1] / PI) * costheta / (0.5 / PI) / prr;
+				// indirb = indirwob * (object.materials[triangleMtlId].diffuse[2] / PI) * costheta / (0.5 / PI) / prr;
 
-				// specular
-#ifdef ENABLE_SPECULAR
-				Vector halfVector = *newp - p; halfVector.normalize();
-				halfVector = halfVector - rayDirection; halfVector.normalize();
-				double cosalpha = std::max(0.0, triangleN * halfVector);
-				double shi = object.materials[triangleMtlId].shininess;
-				double specr = object.materials[triangleMtlId].specular[0] * indirwor * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
-				double specg = object.materials[triangleMtlId].specular[1] * indirwog * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
-				double specb = object.materials[triangleMtlId].specular[2] * indirwob * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
-				indirr += specr;
-				indirg += specg;
-				indirg += specb;
-#endif
+				// // specular
+
+				// Vector halfVector = *newp - p; halfVector.normalize();
+				// halfVector = halfVector - rayDirection; halfVector.normalize();
+				// double cosalpha = std::max(0.0, triangleN * halfVector);
+				// double shi = object.materials[triangleMtlId].shininess;
+				// double specr = object.materials[triangleMtlId].specular[0] * indirwor * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
+				// double specg = object.materials[triangleMtlId].specular[1] * indirwog * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
+				// double specb = object.materials[triangleMtlId].specular[2] * indirwob * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
+				// indirr += specr;
+				// indirg += specg;
+				// indirg += specb;
+
+				double r = 0, g = 0, b = 0;
+				calIndirRadiance(
+					p, triangleId, triangleN, triangleMtlId, 
+					*newp, indirRayDirection, indirwor, indirwog, indirwob, 
+					rayDirection, 
+					prr, 
+					&r, &g, &b
+				);
+				indirr = r;
+				indirg = g;
+				indirb = b;
 			}
 
 		}
@@ -731,7 +758,12 @@ void Scene::write2JPEG(const char* filename) {
 	std::cout << "Writing to jpeg..." << std::endl;
 	unsigned char* colorData = new unsigned char[camera.height*camera.width * 3];
 	for (int ii = 0; ii < camera.height; ii++) {
-		for (int jj = 0; jj < camera.width; jj++) {					
+		for (int jj = 0; jj < camera.width; jj++) {		
+#ifdef GAMMA_CORRECTION
+			pixelsr[camera.width*ii + jj] = std::pow(pixelsr[camera.width*ii + jj], 1.0/GAMMA);
+			pixelsg[camera.width*ii + jj] = std::pow(pixelsg[camera.width*ii + jj], 1.0/GAMMA);
+			pixelsb[camera.width*ii + jj] = std::pow(pixelsb[camera.width*ii + jj], 1.0/GAMMA);
+#endif			
 			colorData[3 * ii*camera.width + 3 * jj] = std::round(255.0 * pixelsr[camera.width*ii + jj]);
 			colorData[3 * ii*camera.width + 3 * jj + 1] = std::round(255.0 * pixelsg[camera.width*ii + jj]);
 			colorData[3 * ii*camera.width + 3 * jj + 2] = std::round(255.0 * pixelsb[camera.width*ii + jj]);
@@ -858,19 +890,62 @@ void Scene::getPIntersectionTriangles(
 		trianglesId.push_back(tris);
 	}
 #endif
-	
+
+#ifdef USE_IGLAABB
+	Eigen::MatrixXd START;
+	START.resize(1, 3);
+	START(0, 0) = rayStartingPoint.x;
+	START(0, 1) = rayStartingPoint.y;
+	START(0, 2) = rayStartingPoint.z;
+
+	Eigen::MatrixXd DIRECTION;
+	DIRECTION.resize(1, 3);
+	DIRECTION(0, 0) = rayDirection.x;
+	DIRECTION(0, 1) = rayDirection.y;
+	DIRECTION(0, 2) = rayDirection.z;
+
+	std::vector<igl::Hit> hits;
+	aabb->intersect_ray(VERTICES, FACETS, START, DIRECTION, hits);
+
+
+	trianglesId.clear();
+	trianglesId.resize(1);
+	int nearestid;
+	if(hits.empty())
+	 	return;
+	// else{
+	// 	double nearest = hits[0].t;
+	// 	nearestid = hits[0].id;
+	// 	for(int i = 0; i < hits.size(); i++){
+	// 		if(hits[i].t < nearest){
+	// 			nearest = hits[i].t;
+	// 			nearestid = hits[i].id;
+	// 		}
+	// 	}
+	// }
+
+	nearestid = hits[0].id;
+	trianglesId[0].push_back(nearestid);
+
+
+#endif
+
+#ifndef USE_GRIDS
+#ifndef USE_IGLAABB
 	std::vector<int> tris;
 	bvht->rayobjectintersectionfinder(rayStartingPoint, rayDirection, tris);
 
 	trianglesId.resize(1);
 	for(int i = 0; i < tris.size(); i++)
 		trianglesId[0].push_back(tris[i]);
+#endif
+#endif
 
 	return;
 }
 
 void Scene::calDirRadiance(
-	const Vector& p, const Vector& pNormal, const int& pMaterial,
+	const Vector& p, const int& triangleId, const Vector& pNormal, const int& pMaterial,
 	const Vector& lightCenter, const Vector& lightNormal,
 	const Vector& ray,
 	const double& lightr, const double& lightg, const double& lightb, const double& lightarea,
@@ -888,10 +963,76 @@ void Scene::calDirRadiance(
 
 	//get area of light
 
+
+	//get the material
+	double diffuse[3];
+	double specular[3];
+	if(object.materials[pMaterial].diffuse_texname.empty()){
+		diffuse[0] = object.materials[pMaterial].diffuse[0];
+		diffuse[1] = object.materials[pMaterial].diffuse[1];
+		diffuse[2] = object.materials[pMaterial].diffuse[2];
+	}
+	else{
+		int vaid = object.shapes[0].mesh.indices[3 * triangleId].vertex_index;
+		int vbid = object.shapes[0].mesh.indices[3 * triangleId + 1].vertex_index;
+		int vcid = object.shapes[0].mesh.indices[3 * triangleId + 2].vertex_index;
+		Vector va(object.attrib.vertices[3 * vaid], object.attrib.vertices[3 * vaid + 1], object.attrib.vertices[3 * vaid + 2]);
+		Vector vb(object.attrib.vertices[3 * vbid], object.attrib.vertices[3 * vbid + 1], object.attrib.vertices[3 * vbid + 2]);
+		Vector vc(object.attrib.vertices[3 * vcid], object.attrib.vertices[3 * vcid + 1], object.attrib.vertices[3 * vcid + 2]);
+		Vector affinecoord = getaffinecoord(va, vb, vc, p);
+		double texcoord[2] = {
+			object.attrib.texcoords[2*vaid] * affinecoord.x + object.attrib.texcoords[2*vbid] * affinecoord.y + object.attrib.texcoords[2*vcid] * affinecoord.z, 
+			object.attrib.texcoords[2*vaid+1] * affinecoord.x + object.attrib.texcoords[2*vbid+1] * affinecoord.y + object.attrib.texcoords[2*vcid+1] * affinecoord.z
+		};
+		texture_ tex;
+		for(int texid = 0;texid < textures.size(); texid++){
+			if(textures[texid].materialid == pMaterial && textures[texid].type == 0){
+				tex = textures[texid];
+				break;
+			}
+		}
+		int wid = std::round((texcoord[0] - (int)texcoord[0]) * (double)tex.width);
+		int hid = std::round((texcoord[1] - (int)texcoord[1]) * (double)tex.height);
+		diffuse[0] = tex.data[3*(hid*tex.height+wid)];
+		diffuse[1] = tex.data[3*(hid*tex.height+wid)+1];
+		diffuse[2] = tex.data[3*(hid*tex.height+wid)+2];
+	}
+	
+	if(object.materials[pMaterial].specular_texname.empty()){
+		specular[0] = object.materials[pMaterial].specular[0];
+		specular[1] = object.materials[pMaterial].specular[1];
+		specular[2] = object.materials[pMaterial].specular[2];
+	}
+	else{
+		int vaid = object.shapes[0].mesh.indices[3 * triangleId].vertex_index;
+		int vbid = object.shapes[0].mesh.indices[3 * triangleId + 1].vertex_index;
+		int vcid = object.shapes[0].mesh.indices[3 * triangleId + 2].vertex_index;
+		Vector va(object.attrib.vertices[3 * vaid], object.attrib.vertices[3 * vaid + 1], object.attrib.vertices[3 * vaid + 2]);
+		Vector vb(object.attrib.vertices[3 * vbid], object.attrib.vertices[3 * vbid + 1], object.attrib.vertices[3 * vbid + 2]);
+		Vector vc(object.attrib.vertices[3 * vcid], object.attrib.vertices[3 * vcid + 1], object.attrib.vertices[3 * vcid + 2]);
+		Vector affinecoord = getaffinecoord(va, vb, vc, p);
+		double texcoord[2] = {
+			object.attrib.texcoords[2*vaid] * affinecoord.x + object.attrib.texcoords[2*vbid] * affinecoord.y + object.attrib.texcoords[2*vcid] * affinecoord.z, 
+			object.attrib.texcoords[2*vaid+1] * affinecoord.x + object.attrib.texcoords[2*vbid+1] * affinecoord.y + object.attrib.texcoords[2*vcid+1] * affinecoord.z
+		};
+		texture_ tex;
+		for(int texid = 0;texid < textures.size(); texid++){
+			if(textures[texid].materialid == pMaterial && textures[texid].type == 1){
+				tex = textures[texid];
+				break;
+			}
+		}
+		int wid = std::round((texcoord[0] - (int)texcoord[0]) * (double)tex.width);
+		int hid = std::round((texcoord[1] - (int)texcoord[1]) * (double)tex.height);
+		specular[0] = tex.data[3*(hid*tex.height+wid)];
+		specular[1] = tex.data[3*(hid*tex.height+wid)+1];
+		specular[2] = tex.data[3*(hid*tex.height+wid)+2];
+	}
+
 	// diffuse radiance
-	*r += lightr * object.materials[pMaterial].diffuse[0] / PI * costheta * costheta_ * lightarea / distance2;
-	*g += lightg * object.materials[pMaterial].diffuse[1] / PI * costheta * costheta_ * lightarea / distance2;
-	*b += lightb * object.materials[pMaterial].diffuse[2] / PI * costheta * costheta_ * lightarea / distance2;
+	*r += lightr * diffuse[0] / PI * costheta * costheta_ * lightarea / distance2;
+	*g += lightg * diffuse[1] / PI * costheta * costheta_ * lightarea / distance2;
+	*b += lightb * diffuse[2] / PI * costheta * costheta_ * lightarea / distance2;
 
 	//half vector
 	Vector halfVector = path - ray;
@@ -902,11 +1043,110 @@ void Scene::calDirRadiance(
 	int shi = object.materials[pMaterial].shininess;
 
 	// specular radiance
-	*r += lightr * object.materials[pMaterial].specular[0] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
-	*g += lightg * object.materials[pMaterial].specular[1] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
-	*b += lightg * object.materials[pMaterial].specular[2] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
+	*r += lightr * specular[0] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
+	*g += lightg * specular[1] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
+	*b += lightg * specular[2] * std::pow(cosalpha, shi) * costheta * costheta_ * lightarea / distance2*30;
 }
 
+void Scene::calIndirRadiance(
+	const Vector& p, const int& triangleId, const Vector& pNormal, const int& pMaterial,
+	const Vector& newp, const Vector& indirRayDirection,
+	const double& indirRayr, const double& indirRayg, const double& indirRayb,
+	const Vector& rayDirection,
+	const double& prr,
+	double* r, double* g, double* b
+){
+	//get cos(theta)
+	double costheta = std::max(0.0, indirRayDirection*pNormal);
+	
+	//get the material
+	double diffuse[3];
+	double specular[3];
+	if(object.materials[pMaterial].diffuse_texname.empty()){
+		diffuse[0] = object.materials[pMaterial].diffuse[0];
+		diffuse[1] = object.materials[pMaterial].diffuse[1];
+		diffuse[2] = object.materials[pMaterial].diffuse[2];
+	}
+	else{
+		int vaid = object.shapes[0].mesh.indices[3 * triangleId].vertex_index;
+		int vbid = object.shapes[0].mesh.indices[3 * triangleId + 1].vertex_index;
+		int vcid = object.shapes[0].mesh.indices[3 * triangleId + 2].vertex_index;
+		Vector va(object.attrib.vertices[3 * vaid], object.attrib.vertices[3 * vaid + 1], object.attrib.vertices[3 * vaid + 2]);
+		Vector vb(object.attrib.vertices[3 * vbid], object.attrib.vertices[3 * vbid + 1], object.attrib.vertices[3 * vbid + 2]);
+		Vector vc(object.attrib.vertices[3 * vcid], object.attrib.vertices[3 * vcid + 1], object.attrib.vertices[3 * vcid + 2]);
+		Vector affinecoord = getaffinecoord(va, vb, vc, p);
+		double texcoord[2] = {
+			object.attrib.texcoords[2*vaid] * affinecoord.x + object.attrib.texcoords[2*vbid] * affinecoord.y + object.attrib.texcoords[2*vcid] * affinecoord.z, 
+			object.attrib.texcoords[2*vaid+1] * affinecoord.x + object.attrib.texcoords[2*vbid+1] * affinecoord.y + object.attrib.texcoords[2*vcid+1] * affinecoord.z
+		};
+		texture_ tex;
+		for(int texid = 0;texid < textures.size(); texid++){
+			if(textures[texid].materialid == pMaterial && textures[texid].type == 0){
+				tex = textures[texid];
+				break;
+			}
+		}
+		int wid = std::round((texcoord[0] - (int)texcoord[0]) * (double)tex.width);
+		int hid = std::round((texcoord[1] - (int)texcoord[1]) * (double)tex.height);
+		diffuse[0] = tex.data[3*(hid*tex.height+wid)];
+		diffuse[1] = tex.data[3*(hid*tex.height+wid)+1];
+		diffuse[2] = tex.data[3*(hid*tex.height+wid)+2];
+	}
+	
+	if(object.materials[pMaterial].specular_texname.empty()){
+		specular[0] = object.materials[pMaterial].specular[0];
+		specular[1] = object.materials[pMaterial].specular[1];
+		specular[2] = object.materials[pMaterial].specular[2];
+	}
+	else{
+		int vaid = object.shapes[0].mesh.indices[3 * triangleId].vertex_index;
+		int vbid = object.shapes[0].mesh.indices[3 * triangleId + 1].vertex_index;
+		int vcid = object.shapes[0].mesh.indices[3 * triangleId + 2].vertex_index;
+		Vector va(object.attrib.vertices[3 * vaid], object.attrib.vertices[3 * vaid + 1], object.attrib.vertices[3 * vaid + 2]);
+		Vector vb(object.attrib.vertices[3 * vbid], object.attrib.vertices[3 * vbid + 1], object.attrib.vertices[3 * vbid + 2]);
+		Vector vc(object.attrib.vertices[3 * vcid], object.attrib.vertices[3 * vcid + 1], object.attrib.vertices[3 * vcid + 2]);
+		Vector affinecoord = getaffinecoord(va, vb, vc, p);
+		double texcoord[2] = {
+			object.attrib.texcoords[2*vaid] * affinecoord.x + object.attrib.texcoords[2*vbid] * affinecoord.y + object.attrib.texcoords[2*vcid] * affinecoord.z, 
+			object.attrib.texcoords[2*vaid+1] * affinecoord.x + object.attrib.texcoords[2*vbid+1] * affinecoord.y + object.attrib.texcoords[2*vcid+1] * affinecoord.z
+		};
+		texture_ tex;
+		for(int texid = 0;texid < textures.size(); texid++){
+			if(textures[texid].materialid == pMaterial && textures[texid].type == 1){
+				tex = textures[texid];
+				break;
+			}
+		}
+		int wid = std::round((texcoord[0] - (int)texcoord[0]) * (double)tex.width);
+		int hid = std::round((texcoord[1] - (int)texcoord[1]) * (double)tex.height);
+		specular[0] = tex.data[3*(hid*tex.height+wid)];
+		specular[1] = tex.data[3*(hid*tex.height+wid)+1];
+		specular[2] = tex.data[3*(hid*tex.height+wid)+2];
+	}
+
+	*r = 0;
+	*g = 0;
+	*b = 0;
+
+	// diffuse
+	*r += indirRayr * (diffuse[0] / PI) * costheta / (0.5 / PI) / prr;
+	*g += indirRayg * (diffuse[1] / PI) * costheta / (0.5 / PI) / prr;
+	*b += indirRayb * (diffuse[2] / PI) * costheta / (0.5 / PI) / prr;
+
+	// specular
+	Vector halfVector = newp - p; halfVector.normalize();
+	halfVector = halfVector - rayDirection; halfVector.normalize();
+	double cosalpha = std::max(0.0, pNormal * halfVector);
+	double shi = object.materials[pMaterial].shininess;
+	*r += specular[0] * indirRayr * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
+	*g += specular[1] * indirRayg * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
+	*b += specular[2] * indirRayb * std::pow(cosalpha, shi) *costheta/ (0.5 / PI) / prr;
+
+	return;
+}
+
+#ifndef USE_GRIDS
+#ifndef USE_IGLAABB
 void Scene::buildBVHTree(){
 	bvht = new bvhTree_;
 	bvht->setmaxdepth(20);
@@ -928,3 +1168,74 @@ void Scene::buildBVHTree(){
 	bvht->buildtree();
 	return;
 }
+#endif
+#endif
+
+void Scene::loadTextures(const char* scenepath){
+	textures.clear();
+	for(int materialid = 0; materialid < object.materials.size(); materialid++){
+		if(object.materials[materialid].diffuse_texname.empty() && object.materials[materialid].specular_texname.empty())
+			continue;
+		if(!object.materials[materialid].diffuse_texname.empty()){
+			texture_ texture;
+			texture.materialid = materialid;
+			texture.type = 0;
+			texture.data.clear();
+
+			int n = 0;
+			std::string texturefilename = scenepath;
+			texturefilename.append("/");
+			texturefilename.append(object.materials[materialid].diffuse_texname);
+			unsigned char* colors = readjpg(texturefilename.c_str(), &texture.width, &texture.height, &n);
+			for(int h = 0; h < texture.height; h++){
+				for(int w = 0; w < texture.width; w++){
+					texture.data.push_back((double)colors[3*(h*texture.width + w)] / 256.0);
+					texture.data.push_back((double)colors[3*(h*texture.width + w) + 1] / 256.0);
+					texture.data.push_back((double)colors[3*(h*texture.width + w) + 2] / 256.0);
+				}
+			}
+			textures.push_back(texture);
+		}
+		if(!object.materials[materialid].specular_texname.empty()){
+			texture_ texture;
+			texture.materialid = materialid;
+			texture.type = 1;
+			texture.data.clear();
+
+			int n = 0;
+			std::string texturefilename = scenepath;
+			texturefilename.append("/");
+			texturefilename.append(object.materials[materialid].specular_texname);
+			unsigned char* colors = readjpg(texturefilename.c_str(), &texture.width, &texture.height, &n);
+			for(int h = 0; h < texture.height; h++){
+				for(int w = 0; w < texture.width; w++){
+					texture.data.push_back((double)colors[3*(h*texture.width + w)] / 256.0);
+					texture.data.push_back((double)colors[3*(h*texture.width + w) + 1] / 256.0);
+					texture.data.push_back((double)colors[3*(h*texture.width + w) + 2] / 256.0);
+				}
+			}
+			textures.push_back(texture);
+		}
+	}
+	return;
+}
+
+#ifdef USE_IGLAABB
+void Scene::buildAABBTree(){
+	aabb = new igl::AABB<Eigen::MatrixXd, 3>;
+
+	VERTICES.resize(object.attrib.vertices.size() /3, 3);
+	FACETS.resize(object.shapes[0].mesh.num_face_vertices.size(), 3);
+	for(int vid = 0; vid < object.attrib.vertices.size()/3; vid ++){
+		VERTICES(vid, 0) = object.attrib.vertices[3*vid];
+		VERTICES(vid, 1) = object.attrib.vertices[3*vid+1];
+		VERTICES(vid, 2) = object.attrib.vertices[3*vid+2];
+	}
+	for(int fid = 0; fid < object.shapes[0].mesh.num_face_vertices.size(); fid++){
+		FACETS(fid, 0) = object.shapes[0].mesh.indices[3*fid].vertex_index;
+		FACETS(fid, 1) = object.shapes[0].mesh.indices[3*fid+1].vertex_index;
+		FACETS(fid, 2) = object.shapes[0].mesh.indices[3*fid+2].vertex_index;
+	}
+	aabb->init(VERTICES, FACETS);
+}
+#endif

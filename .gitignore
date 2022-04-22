@@ -9,3 +9,4 @@ bin/
 # other files
 doc/
 MonteCarloPathTracer
+extern/
