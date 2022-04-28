@@ -1,19 +1,9 @@
 #include <iostream>
 #include <random>
 
-//#define PARALLEL
-#ifdef PARALLEL
-#include <omp.h>
-#endif
-
 #include "scene.h"
 
 int main(int argc, char** argv) {
-#ifdef PARALLEL
-#pragma omp parallel for num_threads(6)
-{
-#endif
-
 	Scene* scene = new Scene;
 	if(argc < 3){
 		std::cout<< "Obj file name needed." << std::endl;
@@ -40,9 +30,5 @@ int main(int argc, char** argv) {
 	scene->getLightFacets();
 	scene->MonteCarloPathTracer(sampletime, logfilename.c_str());
 	scene->write2JPEG(outfilename.c_str());
-
-#ifdef PARALLEL
-}
-#endif
 	return 0;
 }

@@ -10,7 +10,8 @@
 #include <time.h>
 #include <set>
 
-#define USE_IGLAABB
+//#define USE_IGLAABB
+//#define USE_GRIDS
 #define GAMMA_CORRECTION
 
 #ifdef USE_GRIDS
@@ -24,7 +25,7 @@
 #endif
 
 
-#ifndef USE_GRID
+#ifndef USE_GRIDS
 #ifndef USE_IGLAABB
 #include "bvhtree.h"
 #endif
@@ -38,6 +39,11 @@
 #endif
 //#define ENABLE_REFRACTION
 #define ENABLE_INDIRECT_LIGHT
+
+//#define PARALLEL
+#ifdef PARALLEL
+#include <omp.h>
+#endif
 
 struct texture_{
 	int materialid;
@@ -121,7 +127,7 @@ public:
 	);
 
 	/**
-	 * @brief Monte Carlo shader
+	 * @brief path tracing shader
 	 * 
 	 * @param p 
 	 * @param triangleId
@@ -209,6 +215,24 @@ public:
 		double* r, double* g, double* b
 	);
 
+	/**
+	 * @brief get the in-direct radiance
+	 * 
+	 * @param p 
+	 * @param triangleId 
+	 * @param pNormal 
+	 * @param pMaterial 
+	 * @param newp 
+	 * @param indirRayDirection 
+	 * @param indirRayr 
+	 * @param indirRayg 
+	 * @param indirRayb 
+	 * @param rayDirection 
+	 * @param prr possibility of Russian Roulette
+	 * @param r 
+	 * @param g 
+	 * @param b 
+	 */
 	void calIndirRadiance(
 		const Vector& p, const int& triangleId, const Vector& pNormal, const int& pMaterial,
 		const Vector& newp, const Vector& indirRayDirection,
