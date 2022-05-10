@@ -274,18 +274,18 @@ void Scene::MonteCarloPathTracer(const int& sampletime, const char* logfilename)
 	double start = clock();
 	// for every pixel
 	//some code to debug here
-	for(int ii = 360; ii < 361; ii++) {
-	//for (int ii = 0; ii < camera.height; ii++) {
+	//for(int ii = 360; ii < 361; ii++) {
+	for (int ii = 0; ii < camera.height; ii++) {
 		double lineStart = clock();
 
 #ifdef PARALLEL
 		omp_set_num_threads(16);
 		#pragma omp parallel for
 #endif
-		for(int jj = 240; jj < 241; jj++){
-		//for (int jj = 0; jj < camera.width; jj++) {
+		//for(int jj = 240; jj < 241; jj++){
+		for (int jj = 0; jj < camera.width; jj++) {
 			// sample times
-			int sampleTimes = 10;
+			int sampleTimes = sampletime;
 
 			Vector pixel = screenCenter - (double)(ii - camera.height / 2) * up - (double)(jj - camera.width / 2)*side;
 
@@ -685,12 +685,27 @@ void Scene::shade(
 		// it's starting point is shading point
 		// and then randomly get the ray direction
 		Vector indirRayStartingPoint = p;
+
+		// get the indirect ray's direction
 		Vector indirRayDirection(distrt(eng), distrt(eng), distrt(eng));
-		indirRayDirection.normalize();
-		if(indirRayDirection * triangleN < 0){
-			indirRayDirection.x = -indirRayDirection.x;
-			indirRayDirection.y = -indirRayDirection.y;
-			indirRayDirection.z = -indirRayDirection.z;
+		
+		if(object.materials[triangleMtlId].specular_texname.empty()){
+			if(indirRayDirection * triangleN < 0){  
+				indirRayDirection.x = -indirRayDirection.x;
+				indirRayDirection.y = -indirRayDirection.y;
+				indirRayDirection.z = -indirRayDirection.z;
+			}
+		}
+		else{
+			Vector halfVector = indirRayDirection - rayDirection;
+			halfVector.normalize();
+			while(std::abs(halfVector*triangleN - 1) > 0.25){
+				indirRayDirection.x = distrt(eng);
+				indirRayDirection.y = distrt(eng);
+				indirRayDirection.z = distrt(eng);
+				halfVector = indirRayDirection - rayDirection;
+				halfVector.normalize();
+			}
 		}
 
 		// tell if there is new intersection 
